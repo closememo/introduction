@@ -4,7 +4,7 @@
 
 ## 1. 개요
 
-- 클로즈메모는 웹기반 메모장입니다. 카테고리와 태그로 분류가 가능하고 검색이 편한 메모장을 만드는 것을 목표로 시작했습니다.
+- 클로즈메모는 웹 기반 메모장입니다. 카테고리와 태그로 분류가 가능하고 검색이 편한 메모장을 만드는 것을 목표로 시작했습니다.
 - 실험적인 성격이 강한 프로젝트입니다.
 - 개발인원 1명.
 
@@ -70,14 +70,14 @@
 #### 2.2.3 infra
 
 - RDBMS: MariaDB
-  + 세 DB 를 분리해서 사용합니다: 쓰기 전용(command), 읽기 전용(query), 관리자용(admin)
+  + 세 종류의 DB를 분리해서 사용합니다: 쓰기전용(command), 읽기전용(query), 관리자용(admin)
 - Messaging: Kafka
-  + 컴포넌트간 이벤트 전달을 위해 사용합니다.
+  + 컴포넌트 간 이벤트 전달을 위해 사용합니다.
 - Search Engine: Elasticsearch
   + '태그로 검색' 기능을 위해 사용합니다.
   + 각 컴포넌트에서 발생하는 로그도 ES 에 저장하고 있습니다. (filebeat, logstash)
 - CI/CD: Jenkins
-  + 코드 변경에 따라 테스트하고, Docker 이미지를 만들고, manifest 파일을 수정합니다.
+  + 변경된 코드가 반영될 때 테스트하고, Docker 이미지를 만들고, manifest 파일을 수정합니다.
 - Nexus
   + Docker 이미지 관리를 위한 private docker registry 역할을 합니다.
 - ArgoCD
@@ -90,23 +90,23 @@
 - CUD(create/update/delete) 요청과 R(read) 요청을 구분하며 URL 경로로 구분됩니다.
 - CUD 요청
   + `gateway` 에서 `command` 모듈로 라우팅합니다
-  + `command` 모듈에서 도메인 단위에서 생성/변경/삭제를 수행하고 DB 에 저장합니다.
+  + `command` 모듈에서 도메인 단위에서 생성/변경/삭제를 수행하고 DB에 저장합니다.
   + 도메인의 생성/변경/삭제 이벤트를 발생시키고 kafka 를 통해 `query` 모듈로 전파합니다.
-  + `query` 모듈에서 읽기전용 DB 에 반영합니다. 이 때, 읽기 전용 필드가 있다면 `query` 에서 처리합니다.
+  + `query` 모듈에서 읽기전용 DB에 반영합니다. 이 때, 읽기 전용 필드가 있다면 `query` 에서 처리합니다.
 - R 요청
   + `gateway` 에서 `query` 모듈로 라우팅합니다.
-  + `query` 에서 읽기전용 DB 를 조회합니다. 이 때, 요청에 적절한 DTO 단위로 반환합니다.
+  + `query` 에서 읽기전용 DB를 조회합니다. 이 때, 요청에 적절한 DTO 단위로 반환합니다.
 
 ### 2.4 메시지 처리 상세
 
 ![messaging](./img/messaging.png)
 
 - `command` 모듈은 메시지 기반으로 설계되었습니다.
-- 메시지는 크게 Command 와 Event 로 구분합니다.
+- 메시지는 크게 Command와 Event로 구분합니다.
   + Command: 도메인 모델을 변경 요청. ex) CreateDocumentCommand
   + Event: 도메인 모델이 변경됨을 알림. ex) DocumentCreatedEvent
-- Command 는 CommandHandler 에서 subscribe 하며 각 handler 를 시작으로 비즈니스 로직을 처리합니다.
-- Event 는 모듈 내부적으로는 EventListener 에서 subscribe 하며 필요한 후처리를 수행하며, 추가적으로 도메인 모델을 수정할 필요가 있다면 Command 를 발생시킵니다. ex) Document 가 새로 생성되어 Category 의 count 를 늘려야 한다면 IncreaseCategoryCountCommand 발생.
+- Command 는 CommandHandler에서 subscribe하며 각 handler를 시작으로 비즈니스 로직을 처리합니다.
+- Event는 모듈 내부적으로는 EventListener에서 subscribe하며 필요한 후처리를 수행하며, 추가적으로 도메인 모델을 수정할 필요가 있다면 Command를 발생시킵니다. ex) Document가 새로 생성되어 Category의 count를 늘려야 한다면 IncreaseCategoryCountCommand 발생.
 - Event 발생시 외부 모듈에도 전파해야 하는데 이때는 kafka 를 이용합니다.
   + spring-integration-kafka 를 사용합니다.
   + `command` 모듈의 kafka publisher 에서 kafka 메시지를 발송합니다.
@@ -148,9 +148,9 @@
 
 #### 이슈개요
 
-클로즈메모는 CQRS 기반이기 때문에 갱신과 조회가 DB 단위에서 분리된 구조입니다. 때문에, DB간 동기화에 시간이 걸립니다. 그래서 짧은 기간 내에 동기화가 필요한 경우 문제가 발생할 수 있습니다.
+클로즈메모는 CQRS 기반이기 때문에 갱신과 조회가 DB 단위에서 분리된 구조입니다. 때문에 DB간 동기화에 시간이 걸립니다. 그래서 짧은 기간 내에 동기화가 필요한 경우 문제가 발생할 수 있습니다.
 
-로그인 처리가 그러한 경우입니다. 특히 "네이버 아이디로 로그인" 같은 외부 로그인 API 를 사용하는 경우 응답시간이 일정하지 않아서 동기화 되기까지 단순히 대기 시간을 늘리는 것으로는 해결이 어렵습니다.
+로그인 처리가 그러한 경우입니다. 특히 "네이버 아이디로 로그인" 같이 외부 로그인 API 를 사용하는 경우 응답시간이 일정하지 않아서 동기화 되기까지 단순히 대기 시간을 늘리는 것으로는 해결이 어렵습니다.
 
 아래는 현재 클로즈메모의 로그인 구조에 대한 설명입니다.
 
@@ -158,7 +158,9 @@
 |:---:|
 | 클로즈메모의 로그인 구조 |
 
-위에서 볼 수 있듯이 DB 두 개가 분리되어 있기 때문에 토큰 정보 동기화(DB 양쪽 모두 저장)가 충분히 빠르게 이루어지지 않으면 토큰 기반 로그인 처리에서 `command` 에서 발급한 토큰이 `query` 에 반영되기 전에 브라우저에서 조회가 발생시 권한 획득을 실패할 수 있습니다.
+위에서 볼 수 있듯이 DB 두 개가 분리되어 있기 때문에 토큰 정보 동기화(DB 양쪽 모두 저장)에 시간이 걸립니다.
+
+토큰 기반 로그인 처리에서 `command` 에서 발급한 토큰이 `query` 에 반영되기 전에 브라우저의 조회요청이 들어온다면 요청에 대한 적절한 권한을 얻을 수 없습니다.
 
 #### 해결방법
 
@@ -215,7 +217,7 @@ Aspect 와 Lock 을 이용하여 Thread 사이의 동기화 문제를 해결하�
 
 #### 이슈개요
 
-kubernetes 으로 운영시 별도의 처리가 없다면 각 컴포넌트에서 application 이 만든 로그 파일이 보존되지 않습니다.
+kubernetes 으로 운영시 별도의 처리가 없다면 각 컴포넌트의 application 이 만든 로그 파일이 보존되지 않습니다.
 
 #### 해결
 
