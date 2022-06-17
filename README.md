@@ -26,7 +26,7 @@
   + Spring Integration (Enterprise Integration Patterns) 을 통해 경량 메시지를 구현합니다.
   + 컴포넌트 사이의 메시지 전달은 kafka 를 이용합니다.
 - DDD & Event Sourcing
-  + 클로즈메모의 핵심 컴포넌트 `command` 에서는 DDD 의 개념을 기본으로 구현되었습니다.
+  + 클로즈메모의 핵심 컴포넌트 `command` 는 DDD 의 개념을 기본으로 구현되었습니다.
   + 도메인에서 발생한 변경사항을 Event 로 전달하고 수정이 필요한 다른 도메인으로 비동기적으로 전파하여 갱신하도록 합니다.
 - ORM
   + JPA 를 기본으로 사용하고 있습니다.
@@ -135,28 +135,118 @@
 
 ![argocd](./img/argocd.png)
 
-## 3. 사용기술
+## 3. 개발 중 발생한 특별한 이슈
 
-### 3.1. Front-end
+### 3.1. 로그인 처리시 컴포넌트간 동기화 문제
+
+- 키워드: kafka, Future, 동기화
+
+#### 이슈개요
+
+클로즈메모는 갱신과 조회가 DB 단위에서 분리된 구조라서 DB간 동기화에 시간이 걸립니다. 또한, 메시지기반 구조라서 짧은 기간 내에 동기화가 필요한 경우 문제가 발생할 수 있습니다.
+
+로그인 처리가 그러한 경우입니다. 특히 "네이버 아이디로 로그인" 같은 외부 로그인 API 를 사용하는 경우 응답시간이 일정하지 않아서 동기화 되기까지 단순히 대기 시간을 늘리는 것으로는 해결이 어렵습니다.
+
+아래는 현재 클로즈메모의 로그인 구조에 대한 설명입니다.
+
+| ![login](./img/login.png) |
+|:---:|
+| 클로즈메모의 로그인 구조 |
+
+위에서 볼 수 있듯이 DB 두 개가 분리되어 있기 때문에 동기화가 충분히 빠르게 이루어지지 않으면 토큰 기반 로그인 처리에서 `command` 에서 발급한 토큰이 `query` 에 반영되기 전에 브라우저에서 조회가 발생시 권한 획득에 실패하는 경우가 있었습니다.
+
+#### 해결방법
+
+동기화가 필요한 경우 `command` 에서 동기화 완료 메시지를 받을 때까지 대기하는 방식으로 해결해 보았습니다. kafka 의 경우 producer 가 subscribe 완료 여부를 알수 없어서 양방향으로 주고 받도록 하였습니다.   
+
+| ![future](./img/future.png) |
+|:---:|
+| Future 와 Kafka 통한 대기 처리 |
+
+- kafka 를 양방향으로 사용합니다.
+  + `command` -> `query`: Event 전달
+  + `query` -> `command`: 반영이 완료되었다는 Ack message
+- 대기를 위해 Future 객체를 사용하여 Thread.sleep() 을 수행합니다.
+- 로그인 시도하는 유저에 대한 ID 를 key 로 하는 전역 map 에 Future 를 저장합니다. 
+- TransactionSynchronizationManager 를 통해 Transactional 어노테이션으로 구분되는 메소드를 실행 단위가 되도록 합니다.
+  + 여기서 대기하다가 kafka 로 부터 응답을 받거나 timeout 이 지나면 Future 가 실행되는 Thread 를 끝내고 프로세스를 진행
+
+### 3.2. 거의 동시에 들어오는 요청에 대한 transaction 처리
+
+- 키워드: spring, transaction, aop, lock, synchronized
+
+#### 이슈개요
+
+클로즈메모의 `command` 모듈에서는 메시지기반 구조를 이용합니다. 이 때, 들어오는 다수의 메시지를 동시적으로 처리하기 위해 ThreadPoolTaskExecutor 를 통해 여러 thread 를 관리합니다. 그런데, 이 경우 문제가 발생할 수 있습니다.
+
+아래는 현재 구조와 문제가 발생하는 부분에 대한 설명입니다.
+
+| ![lock_before](./img/lock1.png) |
+|:---:|
+| 문제가 발생하는 기존 구조 |
+
+거의 동시에 같은 도메인 객체를 수정에 대한 요청이 들어오는 경우 DB 일관성 문제가 생길 수 있습니다.
+
+- Command 마다 Thread 를 할당받아 사용
+- 각 Thread 에서는 @Transactional 어노테이션을 사용하지만, 어노테이션은 Thread 범위만 보장하기 때문에 다른 Thread 와의 동기화는 해결되지 않음
+- 동시에 다수의 Thread 가 실행 될 때, DB 일관성이 깨질 수 있음
+
+#### 해결 
+
+| ![lock_after](./img/lock2.png) |
+|:---:|
+| lock을 추가하여 수정한 구조 |
+
+- DB 에서 수정이 대상이 되는 도메인 아이디를 key 로 하는 전역 map 이 존재
+- 각 비즈니스 로직 실행 시 aop 를 이용하여 같은 도메인 객체를 수정하게 되는 경우 lock 을 사용하여 동기화를 수행
+
+### 3.3. Pod 단위 로그 수집
+
+- 키워드: kubernetes, pod, sidecar 패턴
+
+#### 이슈개요
+
+kubernetes 으로 운영시 별도의 처리가 없다면 각 컴포넌트에서 application 이 만든 로그 파일이 보존되지 않습니다.
+
+#### 해결
+
+지난 로그를 기록하고 검색에 용이하기 위해서 로그를 elasticsearch 에 저장하는 것이 좋다고 생각해서 구현해 보았습니다.
+
+| ![logcollection](./img/logcollection.png) |
+|:---:|
+| 로그 수집을 위한 kubernetes 와 ELK 구조 |
+
+- ELK 스택
+  + 로그 기록 및 조회를 위해 logstash, elastic, kibana 를 사용합니다.
+- filebeat
+  + sidecar 패턴을 참고하였습니다.
+  + 각 컴포넌트 pod 에 spring application 과 volume 을 공유하는 filebeat 컨테이너를 함께 구동합니다.
+  + application 에서 로그를 파일형태로 공유 volume 에 작성하면 filebeat 에서 실시간으로 logstash 로 전송합니다.
+- spring logback 설정
+  + ELK 스택에 적절한 포맷을 위해 logstash-logback-encoder 를 사용합니다. (json 형태로 로그 기록)
+
+## 4. 사용기술
+
+### 4.1. Front-end
 
 - javascript, typescript, react, express, graphql, apollo
 
-### 3.2. Back-end
+### 4.2. Back-end
 
 - Java, spring(boot, cloud, integration), JPA
 
-### 3.3. Database
+### 4.3. Database
 
 - MariaDB
 
-### 3.4. CI/CD
+### 4.4. CI/CD
 
 - Jenkins
 
-### 3.5. Infra
+### 4.5. Infra
 
 - kafka, elasticsearch, filebeat, logstash, kubernetes, argocd
 
-### 3.6. methodology
+### 4.6. methodology
 
 - CQRS, Message-driven, Event-driven, DDD, GitOps
