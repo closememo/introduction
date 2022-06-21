@@ -196,6 +196,13 @@ kafka 의 경우 producer 가 subscribe 완료 여부를 알수 없어서 양방
   + 어노테이션을 통해 실행이 필요한 메소드 구분
   + 여기서 대기하다가 kafka 로 부터 응답을 받거나 timeout 이 지나면 Future 가 실행되는 Thread 를 끝내고 프로세스를 진행
 
+#### 한계
+
+- 기능 하나를 추가하기 위해서 복잡도 증가
+  + 단순히 HTTP 통신을 이용하는 것으로 해결가능
+- subscribe 하는 컴포넌트가 여러 개인 경우에 대한 고려가 필요
+- subscribe 하는 컴포넌트에서 에러가 발생한 경우에 대한 처리가 필요
+
 ### 3.2. 거의 동시에 들어오는 요청에 대한 transaction 처리
 
 - 키워드: spring, transaction, aop, lock, synchronized
@@ -227,6 +234,11 @@ Aspect 와 Lock 을 이용하여 Thread 사이의 동기화 문제를 해결하�
 - DB 에서 수정이 대상이 되는 도메인 아이디를 key 로 하는 전역 map 를 만듦
 - 각 비즈니스 로직 실행 시 aop 를 이용하여 같은 도메인 객체를 수정하게 되는 경우 lock 을 사용하여 동기화를 수행
 
+#### 한계
+
+- 전역 Lock 으로 인해 성능저하
+  + 하나의 Thread 에서 수행되는 Bulk 처리를 고려
+
 ### 3.3. Pod 단위 로그 수집
 
 - 키워드: kubernetes, pod, sidecar 패턴
@@ -250,6 +262,7 @@ kubernetes 으로 운영시 별도의 처리가 없다면 각 컴포넌트의 ap
   + 각 컴포넌트 pod 에 spring application 과 volume 을 공유하는 filebeat 컨테이너를 함께 구동합니다.
   + application 에서 로그를 파일형태로 공유 volume 에 작성하면 filebeat 에서 실시간으로 logstash 로 전송합니다.
 - spring logback 설정
+  + MDC 를 통해 컴포넌트 정보 추가
   + ELK 스택에 적절한 포맷을 위해 logstash-logback-encoder 를 사용합니다. (json 형태로 로그 기록)
 
 ## 4. 사용기술
